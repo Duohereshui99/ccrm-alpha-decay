@@ -1,0 +1,25 @@
+{
+  "source": "Ni and Ren, Phys. Rev. C 81, 064318 (2010), Table I",
+  "doi": "10.1103/PhysRevC.81.064318",
+  "units": {"q": "MeV", "branch": "percent", "half_life": "s"},
+  "cases": [
+    {"name":"244Cf","A":244,"Z":98,"beta2":0.224,"beta4":0.087,"q":[7.329,7.294,7.203,7.063],"paper_branches":[73.17,25.24,1.59,0.00712],"exp_branches":[75,25,null,null],"paper_half_life":1470},
+    {"name":"246Cf","A":246,"Z":98,"beta2":0.224,"beta4":0.079,"q":[6.862,6.819,6.725,6.574],"paper_branches":[75.91,22.89,1.19,0.00358],"exp_branches":[79.3,20.6,0.15,0.016],"paper_half_life":119000},
+    {"name":"248Cf","A":248,"Z":98,"beta2":0.234,"beta4":0.073,"q":[6.361,6.319,6.218,6.064],"paper_branches":[79.22,19.98,0.79,0.00458],"exp_branches":[80,19.6,0.4,null],"paper_half_life":2.43e7},
+    {"name":"250Cf","A":250,"Z":98,"beta2":0.234,"beta4":0.057,"q":[6.128,6.086,5.987,5.831],"paper_branches":[80.74,18.56,0.70,0.00391],"exp_branches":[84.7,15,0.3,0.01],"paper_half_life":3.29e8},
+    {"name":"252Cf","A":252,"Z":98,"beta2":0.235,"beta4":0.040,"q":[6.217,6.174,6.073,5.920],"paper_branches":[82.85,16.45,0.70,0.00492],"exp_branches":[84.2,15.7,0.24,0.002],"paper_half_life":1.05e8},
+    {"name":"254Cf","A":254,"Z":98,"beta2":0.225,"beta4":0.030,"q":[5.926,5.884,5.783,5.625],"paper_branches":[85.62,13.76,0.62,0.00302],"exp_branches":[83,17,null,null],"paper_half_life":3.17e9},
+    {"name":"246Fm","A":246,"Z":100,"beta2":0.224,"beta4":0.079,"q":[8.373,8.329,8.223,8.058],"paper_branches":[72.88,25.44,1.67,0.0106],"exp_branches":[80,20,null,null],"paper_half_life":1.87},
+    {"name":"248Fm","A":248,"Z":100,"beta2":0.234,"beta4":0.073,"q":[7.999,7.958,7.862,7.712],"paper_branches":[73.90,24.49,1.59,0.0220],"exp_branches":[80,20,null,null],"paper_half_life":31.7},
+    {"name":"250Fm","A":250,"Z":100,"beta2":0.234,"beta4":0.057,"q":[7.557,7.516,7.410,7.249],"paper_branches":[75.51,23.16,1.31,0.0149],"exp_branches":[83,17,null,null],"paper_half_life":1200},
+    {"name":"252Fm","A":252,"Z":100,"beta2":0.235,"beta4":0.040,"q":[7.153,7.111,7.015,6.868],"paper_branches":[79.22,19.62,1.15,0.0137],"exp_branches":[84,15,0.97,0.023],"paper_half_life":48200},
+    {"name":"254Fm","A":254,"Z":100,"beta2":0.245,"beta4":0.026,"q":[7.307,7.264,7.163,7.008],"paper_branches":[81.09,17.81,1.08,0.0130],"exp_branches":[85,14.2,0.82,0.0066],"paper_half_life":10100},
+    {"name":"256Fm","A":256,"Z":100,"beta2":0.236,"beta4":0.015,"q":[7.027,6.981,6.875,6.708],"paper_branches":[84.44,14.66,0.89,0.00685],"exp_branches":[85,15,null,null],"paper_half_life":133000},
+    {"name":"252No","A":252,"Z":102,"beta2":0.235,"beta4":0.049,"q":[8.551,8.507,8.404,8.243],"paper_branches":[75.43,22.96,1.59,0.0276],"exp_branches":[75,25,null,null],"paper_half_life":2.68},
+    {"name":"254No","A":254,"Z":102,"beta2":0.235,"beta4":0.033,"q":[8.223,8.179,8.076,7.915],"paper_branches":[77.87,20.63,1.48,0.0248],"exp_branches":[null,null,null,null],"paper_half_life":30.4},
+    {"name":"256No","A":256,"Z":102,"beta2":0.245,"beta4":0.018,"q":[8.582,8.535,8.427,8.256],"paper_branches":[80.35,18.32,1.31,0.0219],"exp_branches":[87,13,null,null],"paper_half_life":1.77},
+    {"name":"256Rf","A":256,"Z":104,"beta2":0.236,"beta4":0.024,"q":[8.930,8.883,8.776,8.609],"paper_branches":[78.89,19.56,1.52,0.0265],"exp_branches":[null,null,null,null],"paper_half_life":0.989},
+    {"name":"258Rf","A":258,"Z":104,"beta2":0.246,"beta4":0.011,"q":[9.250,9.206,9.105,8.946],"paper_branches":[80.26,18.26,1.45,0.0271],"exp_branches":[null,null,null,null],"paper_half_life":0.0943},
+    {"name":"260Sg","A":260,"Z":106,"beta2":0.247,"beta4":-0.007,"q":[9.923,9.872,9.753,9.566],"paper_branches":[83.66,15.23,1.09,0.0165],"exp_branches":[83,17,null,null],"paper_half_life":0.00688}
+  ]
+}

@@ -1,0 +1,28 @@
+{
+ "nucleus": "252Cf",
+ "Z": 98,
+ "A": 252,
+ "parent_jp": "0+",
+ "daughter": "248Cm",
+ "Q_alpha_MeV": 6.2169469,
+ "Q_alpha_unc_MeV": 0.0000406,
+ "half_life_s": 83531183.05,
+ "half_life_unc_s": 94670.78,
+ "alpha_branch_percent": 96.898,
+ "alpha_branch_unc_percent": 0.003,
+ "levels": [
+  {"jp": "0+", "E_MeV": 0.0, "unc_MeV": 0.0},
+  {"jp": "2+", "E_MeV": 0.043399, "unc_MeV": 0.000025},
+  {"jp": "4+", "E_MeV": 0.1438, "unc_MeV": 0.0002},
+  {"jp": "6+", "E_MeV": 0.2989, "unc_MeV": 0.00029}
+ ],
+ "alpha_intensity_per_100_decays": [81.491218, 14.631598, 0.242245, 0.00193796],
+ "alpha_intensity_unc": [0.38760021, 0.87208212, 0.11627760, null],
+ "beta": [0.235, 0.040],
+ "sources": {
+  "ensdf": "ENSDF through the IAEA LiveChart API (https://www-nds.iaea.org/relnsd/v1/), extracted 2026-11-03; raw responses in ensdf_*.csv. 248Cm levels and 252Cf alpha radiations: evaluator C.D. Nesaraja, cut-off 30-Jun-2024. 252Cf ground state (half-life, decay branches): Mattera, Zhu, Hayes, McCutchan, cut-off 1-Jan-2021.",
+  "Q_alpha": "AME2020 (LiveChart field qa). Same value from the knowledge-base mass table atomicmass,ame2020.txt: 76034.610 - 67392.748 - 2424.916 keV.",
+  "beta": "Input of Ni & Ren 2010 Table I (data/cases.json); a model input, not a measurement."
+ },
+ "notes": "Alpha intensities are per 100 decays of 252Cf. Branching ratios compared with the model are normalized to the sum of the four channels. The API gives an unusable 6+ intensity uncertainty (6e-8), so it is left null; the 8+ branch (6e-5 %) is outside the four-channel model."
+}

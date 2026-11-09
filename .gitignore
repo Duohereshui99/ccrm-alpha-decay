@@ -1,0 +1,7 @@
+# check_ccrm.py 的输出，可随时重新生成
+results/
+# matplotlib 字体缓存与 Python 字节码
+.mpl-cache/
+__pycache__/
+*.pyc
+.DS_Store
