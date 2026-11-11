@@ -1,6 +1,6 @@
 """耦合道 R 矩阵实能量本征值法：形变偶偶核 α 衰变的准束缚（窄共振）态。
 
-输入  System（体系）+ Potential（待推断的 V0、R0、a）+ target（目标态：位次或参考本征矢）[+ Numerics]
+输入  System（体系）+ Potential（待推断的 V0、R0、a）+ target（目标态：位次、参考本征矢或上次的 Result）[+ Numerics]
 输出  Result：该态能量 Q（模型预测的 Q 值）、各道宽度 Γ_ℓ、内外区波函数、出射振幅、位次和诊断。
 
 模型（Ni & Ren, PRC 81, 064318 (2010)）：母核 0⁺ → 子核 K=0 基带 I = 0,2,4,6，ℓ = I，
@@ -8,12 +8,13 @@
     V = V_C - V0·f：f 为形变 Woods–Saxon（有限位移算符，对 β 全阶），V_C 为均匀带电球 + 线性 β 多极。
 数值方法（solve 的执行顺序）：
     1. 内区 [0,a]：正则化 Lagrange–Legendre 网格 + Bloch 算符（Descouvemont, CPC 200 (2016) 199），边界
-       u'(a) = B u(a)，B = sym Re[H'(a) H(a)⁻¹]（实能量窄共振近似，不是 Gamow 极点）。先取 B = 0 对角化选态。
+       u'(a) = B u(a)，B = sym Re[H'(a) H(a)⁻¹]（实能量窄共振近似，不是 Gamow 极点）。先取 B = 0 对角化选态
+       （只求目标位次附近的本征对）。
     2. 外区：nch 组出射解 H(r) 在该态能量下从 Rout 向内传播到 a（含完整耦合势）。方程线性，固定步长的
        8 阶 RK 步（DOP853 的 Butcher 表）即乘一个 8×8 矩阵，所有步的矩阵向量化地一次算出。
     3. 以 B 修正内区：对 H(B) 在该能量处做反幂迭代，直到本征值与外区能量自洽（通常一遍）。
     4. 宽度：u(a) = H(a) A，Γ_ℓ = 2 c k_ℓ |A_ℓ|² / (1 + N_ext)；T½ = ħ ln2 / (P_α ΣΓ)。
-共振态须逐体系判定（candidates 给出判定所需的量，见 README）。
+共振态须逐体系判定（candidates 给出判定所需的量，见 README；它把 E_k(V0) = Q 化为广义本征问题一次求出各位次的 V0）。
 来源：势、角耦合与网格公式改写自早期的 solver.py（原项目 archive/solver_v1/，其动能矩阵参考科研库 code/rmatrix-cc-python）；
       大 ρ 出射库仑波用 DLMF 33.11.1 渐近级数。单位：fm、MeV、s。
 """
@@ -25,7 +26,6 @@ import numpy as np
 from numpy.polynomial.legendre import leggauss, legval
 from scipy.integrate import DOP853
 from scipy.linalg import eigh, lu_factor, lu_solve
-from scipy.optimize import brentq
 from scipy.special import expit, loggamma
 
 HBARC, HBAR = 197.3269804, 6.582119569e-22   # ħc (MeV fm)，ħ (MeV s)
@@ -83,11 +83,12 @@ class Potential:
 @dataclass
 class Numerics:
     """数值参数；物理结果不应随它们改变（收敛检验见 check_ccrm.py）。"""
-    rm: float = 14.0       # 匹配半径 a (fm)：须在势垒下、外转折点之内
+    rm: float = 14.0       # 匹配半径 a (fm)：须在 Rc 之外、势垒之下；外区传播含核势，不必在核势力程之外
     N: int = 120           # 每道 Lagrange 网格点数；Q = Q_exp 处 T½ 与 N = 200 相差约 2e-5
     Rout: float = 360.0    # 外区出射波起点 (fm)；其外的库仑耦合被忽略，弱分支（6⁺）误差约 2e-3，减小时增大
     dr: float = 0.5        # 外区传播步长 (fm)；8 阶方法，传播误差 ∝ dr⁸，默认值下对 Γ 约 1e-7
-    kmax: int = 60         # 选态时求升序最低 kmax+1 个本征对
+    kmax: int = 60         # 按参考向量选态时求升序最低 kmax+1 个本征对
+    window: int = 8        # 以上次的 Result 为 target 时，只求其位次 ± window 的本征对（不足时自动退回全范围）
     etol: float = 1e-7     # 外区能量自洽容差 (MeV)；对应宽度相对误差约 10·etol/MeV
 
 
@@ -129,18 +130,20 @@ def coulomb_h(l, eta, rho):
 def potential(s, p, r, deformed=True):
     """局域势矩阵 V(r) = V_C(r) - V0·f(r) (MeV)，形状 (len(r), nch, nch)。
 
-    核势在位移本征基中为 f_s = 1/[1 + exp((r - R0 - λ_s)/a)]，再转回通道基 U f Uᵀ；
-    库仑势为均匀带电球单极项加线性 β_λ 多极项。deformed=False 给出 β=0 的球形极限。
+    写成 Σ_j g_j(r) M_j，一次矩阵乘法求出：核势在位移本征基中为 f_s = 1/[1 + exp((r - R0 - λ_s)/a)]，
+    M_s = U_s U_sᵀ（即 U diag(f) Uᵀ）；库仑势为均匀带电球单极项（M = 1）加线性 β_λ 多极项（M = A_λ）。
+    deformed=False 给出 β=0 的球形极限。
     """
     r, nch = np.atleast_1d(r)[:, None], len(s.l)
     shift, U, beta = (s.shift, s.U, s.beta) if deformed else (0 * s.shift, np.eye(nch), 0 * np.asarray(s.beta))
-    v = -p.V0 * (U * expit(-(r - p.R0 - shift) / p.a)[:, None, :]) @ U.T      # U diag(f) Uᵀ；expit 防溢出
     inside = r < s.Rc
-    v += np.where(inside, s.zz / (2 * s.Rc) * (3 - (r / s.Rc) ** 2), s.zz / r)[..., None] * np.eye(nch)
-    for lam, b in zip(s.lams, beta):
-        radial = np.where(inside, r ** lam / s.Rc ** (lam + 1), s.Rc ** lam / r ** (lam + 1))
-        v += 3 * s.zz / (2 * lam + 1) * b * radial[..., None] * s.ang[lam]
-    return v
+    g = [-p.V0 * expit(-(r - p.R0 - shift) / p.a),                                 # 核势各取向；expit 防溢出
+         np.where(inside, s.zz / (2 * s.Rc) * (3 - (r / s.Rc) ** 2), s.zz / r)]     # 库仑单极
+    M = [np.einsum("is,js->sij", U, U), np.eye(nch)[None]]
+    for lam, b in zip(s.lams, beta):                                                # 库仑 β_λ 多极
+        g.append(3 * s.zz / (2 * lam + 1) * b * np.where(inside, r ** lam / s.Rc ** (lam + 1), s.Rc ** lam / r ** (lam + 1)))
+        M.append(s.ang[lam][None])
+    return (np.hstack(g) @ np.concatenate(M).reshape(-1, nch * nch)).reshape(-1, nch, nch)
 
 
 @lru_cache(maxsize=8)
@@ -171,11 +174,11 @@ def hamiltonian(s, p, num, deformed=True):
     return h
 
 
-def reference(s, p, num):
-    """球形极限（β=0）各道第 n_ℓ = (G-ℓ)/2 个本征矢，即 G 壳成员 |ℓ, n_ℓ⟩（Sturm：恰有 n_ℓ 个节点），形状 (nch, N)。"""
+def reference(s, p, num, nch=None):
+    """球形极限（β=0）前 nch 道（缺省全部）第 n_ℓ = (G-ℓ)/2 个本征矢，即 G 壳成员 |ℓ, n_ℓ⟩（Sturm：恰有 n_ℓ 个节点），形状 (nch, N)。"""
     hs, N = hamiltonian(s, p, num, deformed=False), num.N               # 球形时各道互不耦合，只对角化对角块
     ref = [eigh(hs[i * N:(i + 1) * N, i * N:(i + 1) * N], subset_by_index=((s.G - l) // 2,) * 2)[1][:, 0]
-           for i, l in enumerate(s.l)]
+           for i, l in enumerate(s.l[:nch])]
     return np.array([v * np.sign(v[-1]) for v in ref])                # 符号约定：近 a 处尾部为正
 
 
@@ -223,21 +226,35 @@ def exterior(s, p, num, E):
     return SimpleNamespace(r=r, Y=Y, S=S, wq=abs(h) * RK_B, k=k, eta=eta, Ha=Y[-1, :m], B=(L + L.T) / 2)
 
 
-def solve(s, p, target, num=Numerics()):
+def solve(s, p, target, num=Numerics(), diag=True):
     """正向计算：体系 s、势参数 p 下目标态的观测量（Result）。
 
-    target 为整数时取升序第 target 个本征态；为参考系数向量（如上次的 Result.c，须同一网格）时，取与之
-    重叠最大的态。先用 B=0 对角化选态，在该态能量处传播外区得 B、H(a)，再对 H(B) 做反幂迭代，直到其本征值
-    与外区所用能量之差 < etol；最后由边界值 u(a) 求出射振幅和各道宽度。
+    target 为整数时取升序第 target 个本征态；为参考系数向量（须同一网格）时，在最低 kmax+1 个本征态中取与之
+    重叠最大的态；为上次的 Result 时同样按重叠选态，但只求其位次 ± window 的本征对。窗外各态的重叠平方和
+    不超过 1 - Σ_窗内 重叠²，若它可能超过窗内次大重叠的平方、或所选态落在窗口边缘，就退回全范围，所以选态
+    结果与全范围相同。先用 B=0 对角化选态，在该态能量处传播外区得 B、H(a)，再对 H(B) 做反幂迭代，直到其
+    本征值与外区所用能量之差 < etol；最后由边界值 u(a) 求出射振幅和各道宽度。diag=False 时不算 G 壳投影
+    （info 中 w_l0、w_G 为 None），推断中可省时。
     """
     nch, N = len(s.l), num.N
     r, w, phia, _ = mesh(N, num.rm)
     h0 = hamiltonian(s, p, num)
-    e, vec = eigh(h0, subset_by_index=(0, num.kmax), driver="evr")  # 第 1 遍：B = 0，选态
-    track = np.ndim(target) > 0
-    ov = abs(vec.T @ target) if track else None
-    k = int(np.argmax(ov)) if track else int(target)
-    E, x = e[k], vec[:, k]
+    ref = target.c if isinstance(target, Result) else target
+    track = np.ndim(ref) > 0
+    k0 = target.rank if isinstance(target, Result) else None if track else int(target)   # 已知或上次的位次
+    d = num.window if track else 1                                   # 整数选态只需 k0 及其上下相邻（间距诊断）
+    lo = 0 if k0 is None else max(k0 - d, 0)
+    e, vec = eigh(h0, subset_by_index=(lo, num.kmax if k0 is None else k0 + d), driver="evr")  # 第 1 遍：B = 0，选态
+    if track:
+        ov = abs(vec.T @ ref)
+        j = int(np.argmax(ov))
+        if k0 is not None and (np.sort(ov)[-2] ** 2 < 1 - ov @ ov or j == len(e) - 1 or (j == 0 and lo > 0)):
+            lo, (e, vec) = 0, eigh(h0, subset_by_index=(0, num.kmax), driver="evr")   # 窗口不足：退回全范围
+            ov = abs(vec.T @ ref)
+            j = int(np.argmax(ov))
+    else:
+        j = k0 - lo
+    k, E, x = lo + j, e[j], vec[:, j]
     for passes in range(2, 6):                                       # 之后各遍：外区 → B → 反幂迭代
         ext = exterior(s, p, num, E)
         hB = h0 - s.c * np.kron(ext.B, np.outer(phia, phia))         # Robin 边界项 -c φ(a)ᵀ B φ(a)
@@ -250,8 +267,9 @@ def solve(s, p, target, num=Numerics()):
             break
     else:
         raise RuntimeError("外区能量自洽迭代未收敛")
-    proj = np.einsum("in,in->i", reference(s, p, num), x.reshape(nch, N))   # ⟨ℓ, n_ℓ|ψ⟩
-    sign = np.sign(x @ target) if track else np.sign(proj[0])
+    want = nch if diag else 0 if track else 1                        # 不算诊断时，整数选态的符号约定只需 ℓ=0 道
+    proj = np.einsum("in,in->i", reference(s, p, num, want), x.reshape(nch, N)[:want]) if want else None  # ⟨ℓ, n_ℓ|ψ⟩
+    sign = np.sign(x @ ref) if track else np.sign(proj[0])
     c = x * (sign or 1.0)                                            # 符号约定：与参考态（或 |ℓ=0, n=G/2⟩）重叠为正
     u, ua = c.reshape(nch, N) / np.sqrt(num.rm * w), c.reshape(nch, N) @ phia   # u_ℓ(r_n)，u_ℓ(a)
     amp = np.linalg.solve(ext.Ha, ua)                                # u(a) = H(a) A
@@ -261,12 +279,12 @@ def solve(s, p, target, num=Numerics()):
     gamma = 2 * s.c * ext.k * abs(amp) ** 2 / (1 + p_ext.sum())      # 1 + N_ext：全空间归一
     pad = np.r_[-np.inf, e, np.inf]
     info = dict(
-        overlap=abs(c @ target) if track else None,  # |⟨参考态|ψ⟩|；明显小于 1 时跟踪到的态已与邻近态混合
+        overlap=abs(c @ ref) if track else None,   # |⟨参考态|ψ⟩|；明显小于 1 时跟踪到的态已与邻近态混合
         overlap_next=np.sort(ov)[-2] if track else None,   # 次大重叠（B = 0 的谱）
         nodes=nodes(u),                            # 各道内部节点数；Wildermuth 条件要求 n_ℓ = (G-ℓ)/2
-        w_l0=proj[0] ** 2,                         # |⟨ℓ=0, n=G/2|ψ⟩|²
-        w_G=(proj ** 2).sum(),                     # G 壳总权重 Σ_ℓ |⟨ℓ, n_ℓ|ψ⟩|²
-        gaps=(e[k] - pad[k], pad[k + 2] - e[k]),   # 与上下相邻本征值的间距 (MeV，B = 0 的谱)
+        w_l0=proj[0] ** 2 if diag else None,       # |⟨ℓ=0, n=G/2|ψ⟩|²
+        w_G=(proj ** 2).sum() if diag else None,   # G 壳总权重 Σ_ℓ |⟨ℓ, n_ℓ|ψ⟩|²
+        gaps=(e[j] - pad[j], pad[j + 2] - e[j]),   # 与上下相邻本征值的间距 (MeV，B = 0 的谱)
         tail=abs(ua).max() / abs(u).max(),         # |u(a)|/max|u|；过小时尾部被本征求解舍入误差主导
         E_ext=E_ext, passes=passes, k=ext.k, eta=ext.eta,
         n_ext=p_ext.sum(), p_ext=p_ext)            # 外区范数 N_ext = Σ_ℓ ∫_a^Rout |u_ℓ|² dr 及各道分量
@@ -274,34 +292,33 @@ def solve(s, p, target, num=Numerics()):
 
 
 def candidates(s, R0, a, Q, ranks=range(30, 50), num=Numerics(), lo=80.0, hi=240.0):
-    """判定共振态用：对每个位次 k 在 [lo, hi] 内调 V0 使 E_k = Q，返回 V0、各道节点数和 Wildermuth 权重。
+    """判定共振态用：对每个位次 k 求 V0 使 E_k = Q（只保留 lo ≤ V0 ≤ hi），返回 V0、各道节点数和 Wildermuth 权重。
 
-    H 对 V0 线性，E_k 随 V0 单调不增，每个位次至多一个根。先在 V0 网格上一次对角化求出所有位次的 B=0 本征值，
-    找到跨过 Q 的区间，再用 Newton 法求根（∂E_k/∂V0 = ⟨ψ_k|∂H/∂V0|ψ_k⟩），不收敛时退回 brentq。
-    只用 B=0 本征值（a = 14 fm 时与 B≠0 的能量差 ≲ 1e-7 MeV）。
+    H(V0) = h0 - V0·F，F 为核势形状因子矩阵（各节点 U diag(f_s) Uᵀ，正定），所以 E_k(V0) = Q 就是广义本征问题
+    (h0 - Q) x = V0 F x：E_k 随 V0 严格递减，第 k 小的广义本征值正是位次 k 的根，一次对角化得到所有位次。
+    数值上解等价的 F x = μ W x（μ = 1/V0，W = h0 - Q，降序第 k+1 个 μ 对应位次 k）：V0 = 0 时没有能级低于 Q，
+    W 正定且最小本征值不小（252Cf、rm = 14 fm 时 15.7 MeV），只对 W 做 Cholesky 分解，1/μ 已准确到 ~1e-8 MeV。
+    反过来对 F 分解则病态：F 在网格外端小到 1e-5 且随匹配半径 rm 指数变小，rm ≳ 20 fm 时结果出错。
+    F 直接由形状因子构造（H(0) - H(1) 相减会带来 ~1e-8 的误差）。最后在原始矩阵上取 Rayleigh 商
+    V0 = xᵀWx / xᵀFx（保险），与逐位次 Newton 求根相差 ≲ 2e-8 MeV。要求 rm 在势垒内（W 正定），已核对到 32 fm。
+    只用 B=0 本征值，这要求 u(rm) 很小：默认 rm = 14 fm 时与 B≠0 的能量差约 2e-8 MeV，rm ≲ 12 fm 时不再可忽略
+    （rm = 10 fm 时 V0 偏 0.04 MeV）。
     """
-    h0, dh = (hamiltonian(s, Potential(v, R0, a), num) for v in (0.0, 1.0))
-    dh -= h0                                                         # ∂H/∂V0
-    k0, grid = min(ranks), np.linspace(lo, hi, 33)
-    E = np.array([eigh(h0 + v * dh, eigvals_only=True, subset_by_index=(k0, max(ranks))) for v in grid]) - Q
+    h0, N, nch = hamiltonian(s, Potential(0.0, R0, a), num), num.N, len(s.l)
+    f = expit(-(mesh(N, num.rm)[0][:, None] - R0 - s.shift) / a)     # 各节点、各取向的形状因子 f_s(r_n)
+    F = np.zeros_like(h0)                                            # F = -∂H/∂V0，只连接同一节点
+    F.reshape(nch, N, nch, N)[:, range(N), :, range(N)] = np.einsum("is,ns,js->nij", s.U, f, s.U)
+    W, n = h0 - Q * np.eye(len(h0)), len(h0)                        # W 正定：V0 = 0 时没有能级低于 Q
+    ks = range(min(ranks), max(ranks) + 1)
+    X = eigh(F, W, subset_by_index=(n - 1 - ks[-1], n - 1 - ks[0]), driver="gvx")[1]  # F x = (1/V0) W x，μ 升序
+    X = np.ascontiguousarray(X[:, ::-1])                             # 改为位次升序（连续存储，后面的矩阵乘法才走 BLAS）
+    X /= np.linalg.norm(X, axis=0)
+    V = np.einsum("ij,ij->j", X, W @ X) / np.einsum("ij,ij->j", X, F @ X)   # Rayleigh 商修正的 V0
     w, rows = mesh(num.N, num.rm)[1], []
-    for k in ranks:
-        i = np.nonzero(E[:-1, k - k0] * E[1:, k - k0] <= 0)[0]      # 跨过 Q 的网格区间
-        if not i.size:
+    for k, v, x in zip(ks, V, X.T):
+        if k not in ranks or not lo <= v <= hi:
             continue
-        i, e = i[0], E[:, k - k0]
-        v = grid[i] - e[i] * (grid[i + 1] - grid[i]) / (e[i + 1] - e[i])   # 线性插值作初值
-        for _ in range(10):                                          # 本征值舍入误差约 1e-8 MeV，故步长到 1e-8 即停
-            ek, x = eigh(h0 + v * dh, subset_by_index=(k, k))
-            step = (ek[0] - Q) / (x[:, 0] @ dh @ x[:, 0])
-            v -= step
-            if abs(step) < 1e-8:
-                break
-        else:                                                        # 未收敛（如回避交叉附近）：在该区间内用 brentq
-            v = brentq(lambda t: eigh(h0 + t * dh, eigvals_only=True, subset_by_index=(k, k))[0] - Q,
-                       grid[i], grid[i + 1], xtol=1e-9)
-            x = eigh(h0 + v * dh, subset_by_index=(k, k))[1]
-        x = x[:, 0].reshape(len(s.l), num.N)
+        x = x.reshape(len(s.l), num.N)
         proj = np.einsum("in,in->i", reference(s, Potential(v, R0, a), num), x)
         rows.append(dict(rank=k, V0=v, nodes=nodes(x / np.sqrt(num.rm * w)), w_l0=proj[0] ** 2, w_G=(proj ** 2).sum()))
     return rows

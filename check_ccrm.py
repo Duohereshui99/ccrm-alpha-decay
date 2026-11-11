@@ -6,14 +6,15 @@
 本目录自成一体，不依赖目录外的文件。终端输出同时写入 results/<核素>_output.txt；另写 <核素>.json（全部数值）、
 <核素>_wavefunctions.csv（波函数数值表）、<核素>_wavefunction.png（波函数分区总览图）及 8 张子图单图。
 1. 单元（--check；各用另一种算法独立核对）：渐近出射库仑波 vs mpmath；外区 H(a)、B vs 自适应 DOP853 直接积分；
-   内区 B=0 本征值 vs 打靶法。
-2. 判定：Ni–Ren 几何下逐个位次调 V0 使 E_k = Q_exp，列出各道节点数和 Wildermuth 权重；取各道节点数
+   内区 B=0 本征值 vs 打靶法；判定用的 V0（广义本征法）处直接对角化，E_k 应等于 Q_exp。
+2. 判定：Ni–Ren 几何下逐个位次求 V0 使 E_k = Q_exp，列出各道节点数和 Wildermuth 权重；取各道节点数
    满足 n_ℓ = (G-ℓ)/2 且 G 壳总权重 ≥ 0.5 的态（README「共振态判定」）。各候选的观测量只作展示。
    判据没有给出唯一态时停止；人工判断后用 --rank 指定位次。
 3. 结果：所选态的 Q、总 α 半衰期，以及各道（分支）的运动学量、内区概率、出射振幅、Γ_ℓ、分支比和
    分半衰期，与实验值对照（缺失的实验值记为 —；实验值不参与判定）。
 4. 数值收敛（--check）：a、N、Rout、外区步长 dr 单独变化，并核对所选态的节点和权重不变。
-5. 跟踪（--check）：V0、R0、a 小幅变化时，以参考本征矢跟踪同一个态，记录重叠、位次和观测量。
+5. 跟踪（--check）：V0、R0、a 小幅变化时，以参考本征矢跟踪同一个态，记录重叠、位次和观测量；并核对只求参考
+   位次附近本征对的窗口选态与全范围选态给出同一结果。
 6. 波函数：各道 u_ℓ 与总波函数 (Σ_ℓ|u_ℓ|²)^(1/2) 的数值表、分区总览图和各子图单图（内区、全空间、势垒衰减区、
    渐近区）。
 """
@@ -33,7 +34,7 @@ from scipy.integrate import solve_ivp
 from scipy.linalg import eigh
 from scipy.optimize import brentq
 
-try:                                                                     # 可选：限制 BLAS 线程数，计时更稳定
+try:                                                                     # 可选：限制 BLAS 线程数（这些矩阵只有 ~500 阶，单线程最快）
     from threadpoolctl import threadpool_limits
 except ImportError:
     def threadpool_limits(limits=None):
@@ -150,6 +151,10 @@ def unit_checks():
         du = solve_ivp(rhs(E), (r0, num.rm), y0, method="DOP853", rtol=1e-10, atol=1e-60).y[m * m:, -1].reshape(m, m)
         return np.linalg.det(du / abs(du).max(0))
     out["interior_E44_dev_MeV"] = float(e44 - brentq(det_du, e44 - 0.01, e44 + 0.01, xtol=1e-10))
+
+    rows = candidates(SYS, p.R0, p.a, Q_EXP, ranks=range(40, 49))   # 4. 判定：广义本征法给出的 V0 处直接对角化
+    out["candidates_E_dev_MeV"] = float(max(abs(eigh(hamiltonian(SYS, Potential(r["V0"], p.R0, p.a), num), eigvals_only=True,
+                                                     subset_by_index=(r["rank"],) * 2)[0] - Q_EXP) for r in rows))
     return out
 
 
@@ -176,7 +181,9 @@ def convergence(p, rank, ref):
     return rows
 
 
-def tracking(p, c_ref):
+def tracking(p, ref):
+    """从所选态 ref（Result）出发小幅改变 V0、R0、a，按本征矢重叠跟踪同一个态。窗口选态（只求 ref.rank ± window
+    的本征对）与全范围选态（传 ref.c）各算一遍，记录二者位次是否相同及宽度的最大相对差。"""
     rows = []
     shifts = [("V0", d) for d in (-3.0, -1.0, 1.0, 3.0)] + [("R0", f) for f in (0.95, 0.98, 1.02, 1.05)] + \
              [("a", f) for f in (0.90, 0.95, 1.05, 1.10)]
@@ -185,7 +192,9 @@ def tracking(p, c_ref):
             Potential(p.V0, p.R0 * x, p.a) if name == "R0" else Potential(p.V0, p.R0, p.a * x)
         label = f"V0 {x:+g}" if name == "V0" else f"{name} x{x:g}"
         try:
-            rows.append(dict(change=label, **summary(solve(SYS, q, c_ref))))
+            res, full = solve(SYS, q, ref), solve(SYS, q, ref.c)
+            rows.append(dict(change=label, **summary(res), window_same_rank=res.rank == full.rank,
+                             window_dG=float(np.max(abs(res.gamma / full.gamma - 1)))))
         except (ValueError, RuntimeError) as err:
             rows.append(dict(change=label, error=str(err)))
     return rows
@@ -456,14 +465,14 @@ def main():
     RESULTS.mkdir(exist_ok=True)
     files = [RESULTS / f"{NAME}{tail}" for tail in ("_output.txt", ".json", "_wavefunctions.csv", "_wavefunction.png")]
     # 终端输出同时写入 files[0]
-    with open(files[0], "w", encoding="utf-8") as log, redirect_stdout(Tee(sys.stdout, log)), threadpool_limits(limits=4):
+    with open(files[0], "w", encoding="utf-8") as log, redirect_stdout(Tee(sys.stdout, log)), threadpool_limits(limits=1):
         print(f"== 开始 {clock.begin:%Y-%m-%d %H:%M:%S}；体系 {NAME}：输入取自 {DATA['source']}")
         out = {"input": dict(source=DATA["source"], Q_exp=Q_EXP, T_alpha_exp_s=T_EXP, branches_exp=BR_EXP, ex=SYS.ex,
                              beta=list(SYS.beta), R0=GEOM.R0, a=GEOM.a, wildermuth_nodes=WILDERMUTH,
                              ranks=list(ARGS.ranks), rank_override=ARGS.rank)}
         if ARGS.check:
             out["unit"] = unit_checks()
-            print("== 单元检验（另一种算法独立核对：库仑波与外区为最大相对差，内区为本征值差 (MeV)）" + clock.lap("单元检验"))
+            print("== 单元检验（另一种算法独立核对：库仑波与外区为最大相对差，内区与判定为能量差 (MeV)）" + clock.lap("单元检验"))
             print(json.dumps(out["unit"], indent=1), flush=True)
         out["candidates"] = rows = identify()
         print("== 候选（每个位次调 V0 使 E = Q_exp）：位次  V0  各道节点  w_l0n11  w_G22  判据  T½(P=0.39)  分支比"
@@ -496,14 +505,16 @@ def main():
             print(f"== 数值收敛（相对默认 a={num.rm:g}, N={num.N}, Rout={num.Rout:g}, dr={num.dr:g}）" + clock.lap("数值收敛"))
             for key, r in out["convergence"].items():
                 print(f"  {key:12s} 同一态 {r['same_state']}  dQ {r['dQ']:+.1e}  T½ {r['T_rel']:+.1e}  分支比 {np.round(r['br_rel'], 6).tolist()}", flush=True)
-            out["tracking"] = tracking(p, res.c)
-            print("== 跟踪（参考本征矢）：变化  Q  位次  重叠/次大  节点  w_G22  T½(P=0.39)  分支比" + clock.lap("跟踪"))
+            out["tracking"] = tracking(p, res)
+            print(f"== 跟踪（参考本征矢；只求位次 {res.rank} ± {num.window} 的本征对，另以全范围选态核对）：变化  Q  位次  "
+                  "重叠/次大  节点  w_G22  T½(P=0.39)  分支比  窗口与全范围的 ΔΓ/Γ" + clock.lap("跟踪"))
             for r in out["tracking"]:
                 if "error" in r:
                     print(f"  {r['change']:9s} 失败：{r['error']}", flush=True)
                     continue
                 print(f"  {r['change']:9s} {r['Q']:.4f} {r['rank']:3d} {r['overlap']:.4f}/{r['overlap_next']:.4f} {r['nodes']} "
-                      f"{r['w_G']:.3f} {r['T_half_P039']:.3e} {np.round(r['branches'], 3).tolist()}", flush=True)
+                      f"{r['w_G']:.3f} {r['T_half_P039']:.3e} {np.round(r['branches'], 3).tolist()} "
+                      f"{r['window_dG']:.0e}{'' if r['window_same_rank'] else '（位次不同！）'}", flush=True)
         save_wavefunctions(res, files[2])
         figs = plot(res, files[3])                                       # 总览图 + 各子图单图
         note = clock.lap("写出数据与图")

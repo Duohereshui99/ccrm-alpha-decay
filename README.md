@@ -4,12 +4,20 @@
 
 不同体系的共振态在谱中的位次并不相同，因此必须逐体系判定。目前只对 252Cf 做了判定和计算。选它的原因是实验数据完整、Jπ 确定：Q_α、半衰期，以及到 248Cm 基带 0⁺/2⁺/4⁺/6⁺ 四个态的精细结构强度都已测量。
 
-本目录自成一体，不依赖目录外的文件：`ccrm.py` 只用 numpy、scipy；`check_ccrm.py` 另用 mpmath、matplotlib、threadpoolctl。
+本目录自成一体，不依赖目录外的文件：`ccrm.py` 只用 numpy、scipy；`check_ccrm.py` 另用 mpmath、matplotlib，以及可选的 threadpoolctl。
 
 | 文件 | 内容 |
 |---|---|
 | `ccrm.py` | 求解器（含注释） |
 | `check_ccrm.py` | 按核素名运行（默认 252Cf）：共振态判定、计算、分层检验和结果输出 |
+| `docs/ccrm_formulas.md` | `ccrm.py` 全部公式与推导；第 6 节详述判定中求 V0 的方法如何由逐位次迭代改写为广义本征值问题，并证明两者等价 |
+| `docs/questions_and_answers.md`、`.pdf` | 问答汇总（2026-11-10 至 11-11）：性能、方法结构、共振态判定、匹配半径收敛、势垒区衰减与出射波等问题的结论与出处 |
+| `docs/levels_vs_V0.py`、`docs/levels_vs_V0.png` | 上述文档的插图（252Cf 的能级随 V0 的变化）及其生成脚本 |
+| `docs/a_convergence.py`、`docs/a_convergence*.png`、`docs/a_convergence.json` | 匹配半径收敛检验（约 11 s）：可观测量和波函数随匹配半径（10–30 fm）的变化（绝对数值与相对偏差两套图）、读出检验（大匹配半径的同一个解改在 14 fm 读出振幅）及全部数值 |
+| `docs/large_rm.py`、`docs/large_rm.png`、`docs/large_rm.json` | 匹配半径越过外转折点时（到 60 fm）的特征值解（约 12 s）：外转折点之外是驻波而非出射波；在 r_m 处读出的宽度；实能量近似略去的 Im L/Re L |
+| `docs/barrier_decay.py`、`docs/barrier_decay.png`、`docs/barrier_decay.json` | 势垒区指数衰减的来源（约 2 s）：数值衰减率与 WKB 对照、同一组基下不同能量的本征矢、B=0 与自洽 B 的本征矢之差 |
+| `docs/potentials.py`、`docs/potentials.png`、`docs/potentials.json` | 各项势能的径向形状与大小（核势各取向、各道有效势、对数坐标下的衰减），以及外区去掉核势（标准 R 矩阵的假设）时 T½ 随匹配半径的变化（约 4 s） |
+| `docs/md2pdf.py`、`docs/ccrm_formulas.pdf` | 把公式文档编译成 PDF 的脚本（xelatex + ctex，需 TeX Live）及编译结果；在 VS Code 中也可用 Markdown 预览（Cmd+K V）阅读 |
 | `data/252Cf.json` | 实验输入，附来源；`data/ensdf_*.csv` 为原始数据库响应 |
 | `data/cases.json` | Ni–Ren 表 I 的 18 个核的输入（Z、A、β₂、β₄、各道能量）及论文值；换核时从这里取 β |
 | `results/252Cf_output.txt` | 终端输出的完整副本，含结果报告 |
@@ -34,12 +42,13 @@ ENSDF 数据经由 IAEA LiveChart API 于 2026-11-03 取得。6⁺ 强度的不�
 
 ## 模型与数值方法
 
-物理模型与 Ni & Ren, PRC 81, 064318 (2010) 相同。
+物理模型与 Ni & Ren, PRC 81, 064318 (2010) 相同。下面是要点，全部公式与推导见 [docs/ccrm_formulas.md](docs/ccrm_formulas.md)。
 
 - **通道：** 母核 0⁺ 衰变到子核 K=0 基带 I = 0, 2, 4, 6（激发能 ε_ℓ），ℓ = I。
 - **核势：** 形变 Woods–Saxon，V_N = −V0 · U diag[f(r − R0 − λ_s)] Uᵀ。其中 O = R_d Σ β_λ A_λ = U diag(λ_s) Uᵀ 是有限位移算符，对 β 全阶。
 - **库仑势：** 均匀带电球单极项，加上对 β 线性的多极项。
 - **内区 [0, a]：** 正则化 Lagrange–Legendre 网格加 Bloch 算符（Descouvemont 2016）。边界条件为 u′(a) = B u(a)，B = sym Re[H′(a) H(a)⁻¹]，即实能量窄共振近似，求的不是复能量 Gamow 极点。
+- **选态（B = 0）：** 只求需要的本征对。给整数位次 k 时求 k ± 1（± 1 只用于能级间距诊断）；给参考向量时求最低 61 个，取重叠最大者；给上次的 `Result` 时只求其位次 ± 8。窗外各态重叠的平方和不超过 1 − Σ_窗内 重叠²；若它可能超过窗内次大重叠的平方，或所选态落在窗口边缘，就退回全范围，所以选态结果与全范围相同。
 - **外区：** 四组独立出射解从 R_out 向内传播到 a，含完整耦合势；R_out 处的初值用 DLMF 33.11.1 渐近级数计算，能量取所选态在 B = 0 下的本征值。Y = [H; H′] 满足线性方程，所以固定步长 dr 的 8 阶 Runge–Kutta 步（DOP853 的 Butcher 表）等价于乘一个 8×8 矩阵；所有步的矩阵一次向量化算出，再逐步相乘。
 - **B 修正与自洽：** 内区矩阵加上 B 项后，在该能量处做反幂迭代（一次 LU 分解），得到修正后的本征矢和本征值；本征值与外区能量之差 < etol 即收敛，默认一遍。
 - **观测量：** A = H(a)⁻¹ u(a)，Γ_ℓ = 2ck_ℓ|A_ℓ|²/(1 + N_ext)，T½ = ħ ln2/(P_α ΣΓ)。N_ext = Σ_ℓ ∫_a^R_out |u_ℓ|² dr 用 RK 各级状态做同阶求积。
@@ -48,7 +57,7 @@ ENSDF 数据经由 IAEA LiveChart API 于 2026-11-03 取得。6⁺ 强度的不�
 ## 共振态判定（252Cf）
 
 1. 几何参数取 Ni–Ren 系统学：R0 = R_d + 1.17 = 8.006 fm，a = 0.5 + 0.33 I = 0.5745 fm。
-2. 对位次 k = 30–49 逐个调 V0，使 E_k = Q_exp，然后记录该态各道的内部节点数，以及它与球形 G 壳成员 |ℓ, n=(G−ℓ)/2⟩ 的重叠：w_l0n11 和 G 壳总权重 w_G22。这一步由 `ccrm.candidates` 完成。
+2. 对位次 k = 30–49 求 V0，使 E_k = Q_exp，然后记录该态各道的内部节点数，以及它与球形 G 壳成员 |ℓ, n=(G−ℓ)/2⟩ 的重叠：w_l0n11 和 G 壳总权重 w_G22。这一步由 `ccrm.candidates` 完成。H(V0) = h0 − V0 F 对 V0 线性，F 为核势形状因子矩阵（正定），所以 E_k(V0) = Q 就是广义本征问题 (h0 − Q) x = V0 F x：E_k 随 V0 严格递减，第 k 小的广义本征值就是位次 k 的根，一次求出所有位次。数值上解等价的 F x = (1/V0) W x，W = h0 − Q：V0 = 0 时没有能级低于 Q，W 正定（最小本征值 15.7 MeV），只对 W 做 Cholesky 分解，条件良好。反过来分解 F 则病态，因为 F 在网格外端小到 1e-5，并随匹配半径指数变小。F 直接由形状因子构造，不用两个哈密顿量相减（2026-11-10 修正：原写法在匹配半径 ≳ 20 fm 时出错）。所得 V0 与逐位次 Newton 求根相差 ≤ 2e-8 MeV（弥散 0.40–0.80 fm、R0 ± 0.5 fm、β₂ = 0.235 与 0.30、匹配半径 14–32 fm 下核对）。推导、等价性证明和逐位次对照见 [docs/ccrm_formulas.md](docs/ccrm_formulas.md) 第 6 节。
 3. 判据有两条：一是 Ni & Ren (2010) 式 (11) 的 Wildermuth 条件，即各道节点数 n_ℓ = (G − ℓ)/2 = [11, 10, 9, 8]；二是该态以 G=22 壳为主，即 w_G22 ≥ 0.5。
 
 在 20 个候选中，只有位次 44 同时满足两条。下表列出几个相近的候选：
@@ -100,11 +109,12 @@ ENSDF 数据经由 IAEA LiveChart API 于 2026-11-03 取得。6⁺ 强度的不�
 - 渐近 H⁺ 与 mpmath 的相对差 ≤ 6e-14。
 - 外区 H(a)、B 与自适应 DOP853（rtol 1e-12）直接积分的相对差分别为 8.1e-8、2.1e-9，即 dr = 0.5 fm 固定步长传播本身的误差。
 - 内区：B = 0 时位次 44 的本征值与打靶法（从 r ≈ 0 积分四组正则解，求 det U′(a) = 0）相差 −2.8e-6 MeV，即 N = 120 网格的离散误差（N = 140 时为 4.7e-6 MeV）。
+- 判定：在 `candidates` 用广义本征法给出的 V0（位次 40–48）处直接对角化，E_k 与 Q_exp 之差 ≤ 1e-8 MeV。
 - 2026-11-08 之前，内区矩阵和外区 H(a)、B 是与早期独立实现 `solver.py` 对照的，相对差为 1.3e-16、4.9e-9、1.4e-10；`solver.py` 归档后改为上面两项。
 
 ## 参数变化时的跟踪
 
-贝叶斯采样中势参数会变化，这时用位次 44 态的本征矢作参考，选与之重叠最大的态（`solve(s, p, ref.c)`）。单参数变化的结果如下：
+贝叶斯采样中势参数会变化，这时用位次 44 态的本征矢作参考，选与之重叠最大的态：`solve(s, p, ref)` 传入参考 `Result`，只求其位次 ± 8 的本征对；`solve(s, p, ref.c)` 传入本征矢，求最低 61 个。两种写法选出同一个态（见「模型与数值方法」中的选态），`--check` 对下表的 12 种变化逐一核对：位次全同，Γ 相对差 ≤ 7e-7，在舍入水平。参考态应固定（如判定所得的态，或沿规定路径延拓），不要用 MCMC 上一个访问点，否则结果依赖采样路径（`BAYESIAN_M1_ROADMAP.md` 第 4 节）。单参数变化的结果如下：
 
 | 变化 | Q (MeV) | 与参考态重叠 / 次大重叠 | 位次与节点 |
 |---|---|---|---|
@@ -131,7 +141,7 @@ python3 check_ccrm.py 244Cf --ranks 25 60   # 放宽候选位次范围（默认 
 python3 check_ccrm.py --check               # 另做单元检验、数值收敛和跟踪
 ```
 
-默认只做判定、所选态计算、外区核对和输出，约 5 s。加 `--check` 时再做三项单元检验、8 种数值变化的收敛检验和 12 种参数变化的跟踪，共约 14 s。
+默认只做判定、所选态计算、外区核对和输出，约 2.5 s。加 `--check` 时再做四项单元检验、8 种数值变化的收敛检验和 12 种参数变化的跟踪，共约 7 s；用终端里的 `/usr/local/bin/python3` 约 10 s，多出的时间在单元检验里的 mpmath 和 `solve_ivp`。
 
 - **输入：** 优先读 `data/<核素>.json`，格式同 `252Cf.json`。必需字段为 `Z`、`A`、`beta`、`levels`（各项的 `E_MeV`、`jp`）和 `Q_alpha_MeV`；`Q_alpha_unc_MeV`、`half_life_s`、`alpha_branch_percent`、`alpha_intensity_per_100_decays`、`daughter` 可以缺，缺失的实验对照显示为 —。
 - **没有数据文件时：** 取 `data/cases.json` 中 Ni–Ren 表 I 的输入：Q = q₀，ε_ℓ = q₀ − q_ℓ（1 keV 精度），实验分支比取表中所引值。表中的计算值只作理论参照显示，不当作实验值。
@@ -146,13 +156,17 @@ from ccrm import System, Potential, solve, candidates
 d = json.load(open("data/252Cf.json"))
 s = System(d["Z"], d["A"], tuple(d["beta"]), [lv["E_MeV"] for lv in d["levels"]])
 ref = solve(s, Potential(155.146671, 8.006050, 0.574516), 44)   # 判定得到的位次
-res = solve(s, Potential(V0, R0, a), ref.c)                     # 势参数变化时跟踪同一个态
+res = solve(s, Potential(V0, R0, a), ref)                       # 势参数变化时跟踪同一个态（只求 ref.rank ± 8 的本征对）
+res = solve(s, Potential(V0, R0, a), ref, diag=False)           # 同上，不算 G 壳投影 w_l0、w_G（约省 2 ms）
 res.Q, res.gamma, res.half_life(P=0.39)                         # 预测 Q (MeV)、各道 Γ (MeV)、T½ (s)
 res.r, res.u, res.r_ext, res.u_ext                              # 内区、外区波函数
 res.rank, res.info                                              # 位次；节点、Wildermuth 权重、重叠、间距等诊断
+rows = candidates(s, 8.006050, 0.574516, d["Q_alpha_MeV"])      # 各位次使 E_k = Q 的 V0 及判定量（约 55 ms）
 ```
 
-复现 252Cf：`python3 check_ccrm.py`（加 `--check` 做全部检验）。默认运行约 5 s，其中判定约 2 s、写出数据与图约 2 s；单次 `solve` 约 26 ms（单线程约 29 ms）。输出都在 `results/`，每次运行覆盖：
+BLAS 线程：这些矩阵只有约 500 阶，用 OpenBLAS（conda 的 numpy）时单线程最快。在 M1 上，单线程 `solve` 22 ms，4 线程 25 ms，默认 8 线程约 50 ms；`candidates` 依次为 55、70、125 ms。Accelerate（`/usr/local/bin/python3` 的 numpy）不受线程数影响。因此直接调用时先限制线程，例如 `threadpoolctl.threadpool_limits(1)` 或环境变量 `OPENBLAS_NUM_THREADS=1`；需要并行时，在参数点之间开多进程。
+
+复现 252Cf：`python3 check_ccrm.py`（加 `--check` 做全部检验）。默认运行约 2.5 s，其中判定约 0.6 s（`candidates` 55 ms，加上 20 个候选各算一次 `solve` 作展示）、写出数据与图约 1.8 s；单次 `solve` 约 22 ms。输出都在 `results/`，每次运行覆盖：
 - `252Cf_output.txt`：终端输出的完整副本。其中「结果」一节列出 Q、总 α 半衰期（及 P_eff），以及各道的 ε_ℓ、q_ℓ、k_ℓ、η_ℓ、外转折点、节点数、u_ℓ(a)、道概率（波函数模方积分：内区 P_ℓ = ∫₀^a u_ℓ² dr，Σ_ℓ P_ℓ = 1；外区 P_ext,ℓ = ∫_a^R_out |u_ℓ|² dr，Σ_ℓ P_ext,ℓ = N_ext）、|A_ℓ|、Γ_ℓ、分支比和分半衰期 T½,ℓ = ħ ln2/(P_α Γ_ℓ)，并与实验对照。第一行记开始时间；各节标题后注明该步用时；最后一行汇总各步用时与合计（墙钟时间，不含 Python 启动和库导入）及结束时间。
 - `252Cf.json`：全部数值；`channels` 键为上述各道的量（`P`、`P_ext` 为道概率的内区与外区部分），A_ℓ 拆为实部 `A_re` 和虚部 `A_im`；`timing_s` 键为各步用时与合计（秒）。
 - `252Cf_wavefunctions.csv`：第一行为列名 r_fm、Re_u0、Im_u0、…、Im_u6、u_tot，随后是以 `#` 开头的说明行。r < a 为内区网格点（u 为实数），r ≥ a 为外区网格点（等步长，约 dr）。可用 `np.genfromtxt(path, delimiter=",", names=True)` 读取。
@@ -182,7 +196,24 @@ res.rank, res.info                                              # 位次；节�
 
 改动前后（N = 140、dr = 0.35 → N = 120、dr = 0.5）252Cf 的结果：V0 变化 −1e-5 MeV，T½ 相对变化 −5.7e-5，分支比 ≤ 4.2e-5；候选表的位次、节点数和判据结果全部相同。
 
-与优化前相比，所选态、候选表和跟踪结果中物理量的相对差 ≤ 1e-6。40 组随机参数（V0 ± 4 MeV、R0 ×0.97–1.03、a ×0.9–1.1）中有解的 35 组，Q 差 ≤ 3e-8 MeV，Γ 相对差 ≤ 1.5e-6，位次全部相同；这些差别都在本征求解的舍入误差水平。N_ext 改用同阶求积后比原来的 Simpson 积分更准（原来误差约 0.1%）。目前单次 `solve` 的主要耗时是 B = 0 下求最低 61 个本征对（约 16 ms）。
+与优化前相比，所选态、候选表和跟踪结果中物理量的相对差 ≤ 1e-6。40 组随机参数（V0 ± 4 MeV、R0 ×0.97–1.03、a ×0.9–1.1）中有解的 35 组，Q 差 ≤ 3e-8 MeV，Γ 相对差 ≤ 1.5e-6，位次全部相同；这些差别都在本征求解的舍入误差水平。N_ext 改用同阶求积后比原来的 Simpson 积分更准（原来误差约 0.1%）。
+
+2026-11-10 的优化（M1，BLAS 单线程；数值参数不变）：
+
+| 环节 | 之前 | 之后 | 做法 |
+|---|---|---|---|
+| `candidates`（位次 30–49） | 1.0 s | 55 ms | E_k(V0) = Q 化为广义本征问题，一次求出所有位次的 V0，再用 Rayleigh 商修正（见「共振态判定」） |
+| 单次 `solve`（整数位次） | 31 ms | 22 ms | 第 1 遍只求 k ± 1 的本征对，原为最低 61 个；势矩阵写成 Σ g_j(r) M_j，一次矩阵乘法求出 |
+| 单次 `solve`（传上次的 `Result` 跟踪） | 31 ms | 25 ms（`diag=False` 23 ms） | 只求其位次 ± 8 的本征对，不足时自动退回全范围 |
+| `check_ccrm.py` 默认 / `--check` | 3.7 s / 约 14 s | 2.5 s / 6.6 s | 以上各项；BLAS 由 4 线程改为单线程 |
+
+改动前后的结果：
+- **候选表：** 位次、节点数和判据结果全同，V0 差 ≤ 1.9e-8 MeV，w_G 差 ≤ 2e-8（绝对）。
+- **所选态：** V0 差 1.2e-8 MeV，Q 差 8.5e-9 MeV，Γ 相对差 ≤ 7.7e-8。这些差别都来自 V0 根本身的舍入，旧的 Newton 法和新的 Rayleigh 商各带约 1e-8 MeV 的误差。
+- **跟踪：** 12 种变化中位次全同，Γ 相对差 ≤ 7e-7。旧代码在同一参数点用 1 线程和 8 线程计算，自身就相差 ≤ 3e-7，两者同一量级。
+- **环境：** conda（numpy 2.1.3，OpenBLAS）与 `/usr/local/bin/python3`（numpy 2.0.0、scipy 1.14.0，Accelerate）下结果相同。
+
+现在单次 `solve` 的耗时：B = 0 对角化约 9 ms，以三对角化为主，与求几个本征对无关；外区传播约 6.6 ms，其中 8 阶 RK 各级约 3.3 ms；LU 分解约 3 ms；G 壳投影约 1.7 ms。
 
 ## 尚未覆盖
 
@@ -199,4 +230,4 @@ res.rank, res.info                                              # 位次；节�
 - 代码改写自早期的 `solver.py`（在原项目的 `archive/solver_v1/` 中，未收入本仓库），包括角耦合、势、网格矩阵元和外区向内积分。`solver.py` 的动能矩阵参考了作者本地科研库中的 `code/rmatrix-cc-python/rmatrix.py`；本目录没有复制该文件。
 - 出射库仑波：DLMF 33.11.1 渐近级数。
 - 外区传播：Dormand–Prince 8 阶 Runge–Kutta 的 Butcher 表（DOP853），系数取自 `scipy.integrate.DOP853`。
-- 依赖：numpy 2.1.3、scipy 1.16.3。检验脚本另需 matplotlib、mpmath 1.3.0 和 threadpoolctl 3.6.0。
+- 依赖：numpy 2.1.3、scipy 1.16.3（numpy 2.0.0、scipy 1.14.0 下也已核对）。检验脚本另需 matplotlib、mpmath 1.3.0，以及可选的 threadpoolctl 3.6.0。
